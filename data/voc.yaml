@@ -1,0 +1,13 @@
+# train and val datasets (image directory or *.txt file with image paths)
+train: ./data/VOC2007/trainval.txt
+val: ./data/VOC2007/test.txt
+test: ./data/VOC2007/test.txt
+
+# number of classes
+nc: 20
+
+# class names
+
+names: ["bus", "dog", "horse", "person", "bottle", "car", "bicycle", 
+        "diningtable", "aeroplane", "sheep", "pottedplant", "cat", 
+        "bird", "train", "cow", "chair", "sofa", "boat", "tvmonitor", "motorbike"]

@@ -138,8 +138,10 @@ class Model(nn.Module):
         m = self.model[-1]  # Detect() module
         for mi, s in zip(m.m, m.stride):  # from
             b = mi.bias.view(m.na, -1)  # conv.bias(255) to (3,85)
-            b[:, 4] += math.log(8 / (640 / s) ** 2)  # obj (8 objects per 640 image)
-            b[:, 5:] += math.log(0.6 / (m.nc - 0.99)) if cf is None else torch.log(cf / cf.sum())  # cls
+            # b[:, 4] += math.log(8 / (640 / s) ** 2)  # obj (8 objects per 640 image)
+            # b[:, 5:] += math.log(0.6 / (m.nc - 0.99)) if cf is None else torch.log(cf / cf.sum())  # cls
+            b[:, 4].data += math.log(8 / (640 / s) ** 2)  # obj (8 objects per 640 image)
+            b[:, 5:].data += math.log(0.6 / (m.nc - 0.99)) if cf is None else torch.log(cf / cf.sum())  # cls
             mi.bias = torch.nn.Parameter(b.view(-1), requires_grad=True)
 
     def _print_biases(self):
@@ -171,6 +173,8 @@ class Model(nn.Module):
 def parse_model(d, ch):  # model_dict, input_channels(3)
     print('\n%3s%18s%3s%10s  %-40s%-30s' % ('', 'from', 'n', 'params', 'module', 'arguments'))
     anchors, nc, gd, gw = d['anchors'], d['nc'], d['depth_multiple'], d['width_multiple']
+    gamma = d['csp_gammas']
+    it = iter(gamma)
     na = (len(anchors[0]) // 2) if isinstance(anchors, list) else anchors  # number of anchors
     no = na * (nc + 5)  # number of outputs = anchors * (classes + 5)
 
@@ -205,10 +209,15 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
             # if m != Focus:
             #     c2 = make_divisible(c2, 8) if c2 != no else c2
 
-            args = [c1, c2, *args[1:]]
+            args = [c1, c2, *args[1:]]          # [input_channel(3), output_channel(arg[0]) / no, arg[1:]]
             if m in [BottleneckCSP, BottleneckCSP2, SPPCSP, VoVCSP, C3]:
-                args.insert(2, n)
+                args.insert(2, n)               # [input_channel(3), output_channel(arg[0]) / no, number]
                 n = 1
+                if  m in [BottleneckCSP, BottleneckCSP2]:
+                    try:
+                        args.insert(3, next(it))    # [input_channel(3), output_channel(arg[0]) / no, number, gamma]
+                    except StopIteration:
+                        raise Exception("Number of gammas (%d) is not suitable for the architecture.", len(gamma))
         elif m in [HarDBlock, HarDBlock2]:
             c1 = ch[f]
             args = [c1, *args[:]]

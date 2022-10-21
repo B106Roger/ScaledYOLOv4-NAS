@@ -1,1 +1,2 @@
-data/VOC2007/images/
+data/VOC2007/*/
+run*/
