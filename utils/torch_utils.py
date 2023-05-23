@@ -124,7 +124,7 @@ def fuse_conv_and_bn(conv, bn):
         return fusedconv
 
 
-def model_info(model, verbose=False):
+def model_info(model, verbose=False, resolution=(224,224)):
     # Plots a line-by-line description of a PyTorch model
     n_p = sum(x.numel() for x in model.parameters())  # number parameters
     n_g = sum(x.numel() for x in model.parameters() if x.requires_grad)  # number gradients
@@ -135,14 +135,21 @@ def model_info(model, verbose=False):
             print('%5g %40s %9s %12g %20s %10.3g %10.3g' %
                   (i, name, p.requires_grad, p.numel(), list(p.shape), p.mean(), p.std()))
 
-    try:  # FLOPS
+    # try:  # FLOPS
+    if True:
         from thop import profile
         flops = profile(deepcopy(model), inputs=(torch.zeros(1, 3, 64, 64),), verbose=False)[0] / 1E9 * 2
         fs = ', %.1f GFLOPS' % (flops * 100)  # 640x640 FLOPS
-    except:
-        fs = ''
+        res = str((640,640))
+        
+        flops_now = profile(deepcopy(model), inputs=(torch.zeros(1, 3, resolution[0], resolution[1]),), verbose=False)[0] / 1E9 * 2
+        fs_now = ', %.1f GFLOPS' % (flops_now)
+        res_now = str(resolution)
+    # except:
+    #     fs = ''
 
-    print('Model Summary: %g layers, %g parameters, %g gradients%s' % (len(list(model.parameters())), n_p, n_g, fs))
+    print('Model Summary @%s: %g layers, %g parameters, %g gradients%s' % (res,     len(list(model.parameters())), n_p, n_g, fs))
+    print('Model Summary @%s: %g layers, %g parameters, %g gradients%s' % (res_now, len(list(model.parameters())), n_p, n_g, fs_now))
 
 
 def load_classifier(name='resnet101', n=2):

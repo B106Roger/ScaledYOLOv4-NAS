@@ -62,14 +62,14 @@ def train(hyp, opt, device, tb_writer=None):
         with torch_distributed_zero_first(rank):
             attempt_download(weights)  # download if not found locally
         ckpt = torch.load(weights, map_location=device)  # load checkpoint
-        model = Model(opt.cfg or ckpt['model'].yaml, ch=3, nc=nc).to(device)  # create
+        model = Model(opt.cfg or ckpt['model'].yaml, ch=3, nc=nc, resolution=opt.img_size).to(device)  # create
         exclude = ['anchor'] if opt.cfg else []  # exclude keys
         state_dict = ckpt['model'].float().state_dict()  # to FP32
         state_dict = intersect_dicts(state_dict, model.state_dict(), exclude=exclude)  # intersect
         model.load_state_dict(state_dict, strict=False)  # load
         print('Transferred %g/%g items from %s' % (len(state_dict), len(model.state_dict()), weights))  # report
     else:
-        model = Model(opt.cfg, ch=3, nc=nc).to(device)# create
+        model = Model(opt.cfg, ch=3, nc=nc, resolution=opt.img_size).to(device)# create
         #model = model.to(memory_format=torch.channels_last)  # create
 
     # Optimizer
@@ -412,6 +412,7 @@ if __name__ == '__main__':
     opt.data, opt.cfg, opt.hyp = check_file(opt.data), check_file(opt.cfg), check_file(opt.hyp)  # check files
     assert len(opt.cfg) or len(opt.weights), 'either --cfg or --weights must be specified'
 
+    print(opt.img_size)
     opt.img_size.extend([opt.img_size[-1]] * (2 - len(opt.img_size)))  # extend to 2 sizes (train, test)
     device = select_device(opt.device, batch_size=opt.batch_size)
     opt.total_batch_size = opt.batch_size

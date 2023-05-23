@@ -55,7 +55,7 @@ class Detect(nn.Module):
 
 
 class Model(nn.Module):
-    def __init__(self, cfg='yolov4-p5.yaml', ch=3, nc=None):  # model, input channels, number of classes
+    def __init__(self, cfg='yolov4-p5.yaml', ch=3, nc=None, resolution=None):  # model, input channels, number of classes
         super(Model, self).__init__()
         if isinstance(cfg, dict):
             self.yaml = cfg  # model dict
@@ -85,6 +85,7 @@ class Model(nn.Module):
 
         # Init weights, biases
         initialize_weights(self)
+        self.resolution = resolution
         self.info()
         print('')
 
@@ -167,7 +168,8 @@ class Model(nn.Module):
         return self
 
     def info(self):  # print model information
-        model_info(self)
+        print('[Info] Model Resolution', self.resolution)
+        model_info(self, resolution=self.resolution)
 
 
 def parse_model(d, ch):  # model_dict, input_channels(3)

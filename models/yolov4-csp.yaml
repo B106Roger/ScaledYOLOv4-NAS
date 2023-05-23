@@ -9,6 +9,8 @@ anchors:
   - [36,75, 76,55, 72,146]  # P4/16
   - [142,110, 192,243, 459,401]  # P5/32
 
+csp_gammas:
+  [0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5]
 # yolov4-csp backbone
 backbone:
   # [from, number, module, args]
