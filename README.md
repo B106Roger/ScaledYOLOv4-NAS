@@ -25,3 +25,6 @@ The commands above should generate following screen.
 comparison between current [ScaledYOLOv4-NAS](https://github.com/B106Roger/ScaledYOLOv4-NAS/commit/3d56bebfd8f39fc803b3980147e9f446c841c024) and [WongKinYiu/ScaledYOLOv4](https://github.com/WongKinYiu/ScaledYOLOv4) master branch.
 
 [Comparison URL Is Here](https://github.com/B106Roger/ScaledYOLOv4-NAS/compare/676800364a3446900b9e8407bc880ea2127b3415...3d56bebfd8f39fc803b3980147e9f446c841c024#diff-ed183d67207df065a11e1289f19d34cc2abbc5448dea952683cfe9728c342b95)
+
+## Model Config 
+![`model_config`](doc/model_config.jpg)
