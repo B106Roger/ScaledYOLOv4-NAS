@@ -6,12 +6,14 @@ import shutil
 import time
 from pathlib import Path
 from threading import Thread
+import SharedArray
 
 import cv2
 import numpy as np
 import torch
 from PIL import Image, ExifTags
 from torch.utils.data import Dataset
+import torch.distributed as dist
 from tqdm import tqdm
 
 from utils.general import xyxy2xywh, xywh2xyxy, torch_distributed_zero_first
@@ -47,7 +49,7 @@ def exif_size(img):
 
 
 def create_dataloader(path, imgsz, batch_size, stride, opt, hyp=None, augment=False, cache=False, pad=0.0, rect=False,
-                      local_rank=-1, world_size=1):
+                      local_rank=-1, world_size=1, use_shared_mem=False, shared_mem_limit=5000):
     # Make sure only the first process in DDP process the dataset first, and the following others can use the cache.
     with torch_distributed_zero_first(local_rank):
         dataset = LoadImagesAndLabels(path, imgsz, batch_size,
@@ -57,10 +59,13 @@ def create_dataloader(path, imgsz, batch_size, stride, opt, hyp=None, augment=Fa
                                       cache_images=cache,
                                       single_cls=opt.single_cls,
                                       stride=int(stride),
-                                      pad=pad)
+                                      pad=pad,
+                                      use_shared_mem=use_shared_mem,
+                                      shared_mem_limit=shared_mem_limit)
 
     batch_size = min(batch_size, len(dataset))
     nw = min([os.cpu_count() // world_size, batch_size if batch_size > 1 else 0, 8])  # number of workers
+    print(f'[Info] Number of worker {nw}')
     train_sampler = torch.utils.data.distributed.DistributedSampler(dataset) if local_rank != -1 else None
     dataloader = torch.utils.data.DataLoader(dataset,
                                              batch_size=batch_size,
@@ -292,7 +297,7 @@ class LoadStreams:  # multiple IP or RTSP cameras
 
 class LoadImagesAndLabels(Dataset):  # for training/testing
     def __init__(self, path, img_size=640, batch_size=16, augment=False, hyp=None, rect=False, image_weights=False,
-                 cache_images=False, single_cls=False, stride=32, pad=0.0):
+                 cache_images=False, single_cls=False, stride=32, pad=0.0, use_shared_mem=False, shared_mem_limit=5000):
         try:
             f = []  # image files
             for p in path if isinstance(path, list) else [path]:
@@ -313,9 +318,10 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
 
         n = len(self.img_files)
         assert n > 0, 'No images found in %s. See %s' % (path, help_url)
-        bi = np.floor(np.arange(n) / batch_size).astype(np.int)  # batch index
+        bi = np.floor(np.arange(n) / batch_size).astype(np.int32)  # batch index
         nb = bi[-1] + 1  # number of batches
 
+        self.path = path
         self.n = n  # number of images
         self.batch = bi  # batch index of image
         self.img_size = img_size
@@ -367,7 +373,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                 elif mini > 1:
                     shapes[i] = [1, 1 / mini]
 
-            self.batch_shapes = np.ceil(np.array(shapes) * img_size / stride + pad).astype(np.int) * stride
+            self.batch_shapes = np.ceil(np.array(shapes) * img_size / stride + pad).astype(np.int32) * stride
 
         # Cache labels
         create_datasubset, extract_bounding_boxes, labels_loaded = False, False, False
@@ -411,7 +417,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                         b = x[1:] * [w, h, w, h]  # box
                         b[2:] = b[2:].max()  # rectangle to square
                         b[2:] = b[2:] * 1.3 + 30  # pad
-                        b = xywh2xyxy(b.reshape(-1, 4)).ravel().astype(np.int)
+                        b = xywh2xyxy(b.reshape(-1, 4)).ravel().astype(np.int32)
 
                         b[[0, 2]] = np.clip(b[[0, 2]], 0, w)  # clip boxes outside of image
                         b[[1, 3]] = np.clip(b[[1, 3]], 0, h)
@@ -426,6 +432,12 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             s = 'WARNING: No labels found in %s. See %s' % (os.path.dirname(file) + os.sep, help_url)
             print(s)
             assert not augment, '%s. Can not train without labels.' % s
+
+        # Load images into shared memory
+        self.USE_SHARED_MEM = use_shared_mem
+        self.SHARED_MEM_LIMIT = shared_mem_limit
+        if self.USE_SHARED_MEM:
+            self.load_shared_memory()
 
         # Cache images into memory for faster training (WARNING: large datasets may exceed system RAM)
         self.imgs = [None] * n
@@ -564,19 +576,96 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         return torch.stack(img, 0), torch.cat(label, 0), path, shapes
 
 
+    def clean_shared_memory(self):
+        cur_rank, num_gpus = get_dist_info()
+        num_iter = min([self.SHARED_MEM_LIMIT, self.n])
+        for index in tqdm(range(num_iter), desc="Clean Shared Memory "):
+            filename = self.img_files[index]
+            
+            sa_key = f'{filename}'.replace('.','_').replace('/','_')
+            if not os.path.exists(f"/dev/shm/{sa_key}"):
+                continue
+
+            SharedArray.delete(f"shm://{sa_key}")
+            
+        if num_gpus > 1:
+            dist.barrier()
+            
+    def load_shared_memory(self):
+        cur_rank, num_gpus = get_dist_info()
+        num_iter = min([self.SHARED_MEM_LIMIT, self.n])
+        for index in tqdm(range(num_iter), desc="Load Shared Memory "):
+            filename = self.img_files[index]
+            
+            sa_key = f'{filename}'.replace('.','_').replace('/','_')
+            if os.path.exists(f"/dev/shm/{sa_key}"):
+                continue
+            
+            img = cv2.imread(filename)  # BGR
+            assert img is not None, 'Image Not Found ' + path
+            h0, w0 = img.shape[:2]  # orig hw
+            r = self.img_size / max(h0, w0)  # resize image to img_size
+            if r != 1:  # always resize down, only resize up if training with augmentation
+                interp = cv2.INTER_AREA if r < 1 and not self.augment else cv2.INTER_LINEAR
+                img = cv2.resize(img, (int(w0 * r), int(h0 * r)), interpolation=interp)
+            sa_create(f"shm://{sa_key}", img)
+            sa_create(f"shm://{sa_key}_size", np.array([h0, w0]))
+            
+
+
+
 # Ancillary functions --------------------------------------------------------------------------------------------------
+def sa_create(name, var):
+    x = SharedArray.create(name, var.shape, dtype=var.dtype)
+    x[...] = var[...]
+    x.flags.writeable = False
+    return x
+
+
+def get_dist_info(return_gpu_per_machine=False):
+    if torch.__version__ < '1.0':
+        initialized = dist._initialized
+    else:
+        if dist.is_available():
+            initialized = dist.is_initialized()
+        else:
+            initialized = False
+    if initialized:
+        rank = dist.get_rank()
+        world_size = dist.get_world_size()
+    else:
+        rank = 0
+        world_size = 1
+
+    if return_gpu_per_machine:
+        gpu_per_machine = torch.cuda.device_count()
+        return rank, world_size, gpu_per_machine
+
+    return rank, world_size
+
+
 def load_image(self, index):
     # loads 1 image from dataset, returns img, original hw, resized hw
     img = self.imgs[index]
     if img is None:  # not cached
         path = self.img_files[index]
-        img = cv2.imread(path)  # BGR
-        assert img is not None, 'Image Not Found ' + path
-        h0, w0 = img.shape[:2]  # orig hw
-        r = self.img_size / max(h0, w0)  # resize image to img_size
-        if r != 1:  # always resize down, only resize up if training with augmentation
-            interp = cv2.INTER_AREA if r < 1 and not self.augment else cv2.INTER_LINEAR
-            img = cv2.resize(img, (int(w0 * r), int(h0 * r)), interpolation=interp)
+        
+        if self.USE_SHARED_MEM:
+            sa_key = f'{path}'.replace('.','_').replace('/','_')
+            shm_key_exist = os.path.exists(f"/dev/shm/{sa_key}")
+        
+        if (not self.USE_SHARED_MEM) or (not shm_key_exist):
+            img = cv2.imread(path)  # BGR
+            assert img is not None, 'Image Not Found ' + path
+            h0, w0 = img.shape[:2]  # orig hw
+            r = self.img_size / max(h0, w0)  # resize image to img_size
+            if r != 1:  # always resize down, only resize up if training with augmentation
+                interp = cv2.INTER_AREA if r < 1 and not self.augment else cv2.INTER_LINEAR
+                img = cv2.resize(img, (int(w0 * r), int(h0 * r)), interpolation=interp)
+        else:
+            img = SharedArray.attach(f"shm://{sa_key}").copy()
+            h0, w0 = SharedArray.attach(f"shm://{sa_key}_size").copy()
+            
         return img, (h0, w0), img.shape[:2]  # img, hw_original, hw_resized
     else:
         return self.imgs[index], self.img_hw0[index], self.img_hw[index]  # img, hw_original, hw_resized

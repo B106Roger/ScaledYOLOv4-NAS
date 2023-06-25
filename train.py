@@ -148,7 +148,8 @@ def train(hyp, opt, device, tb_writer=None):
     # Trainloader
     dataloader, dataset = create_dataloader(train_path, imgsz, batch_size, gs, opt, hyp=hyp, augment=True,
                                             cache=opt.cache_images, rect=opt.rect, local_rank=rank,
-                                            world_size=opt.world_size)
+                                            world_size=opt.world_size,
+                                            use_shared_mem=True, shared_mem_limit=80000)
     mlc = np.concatenate(dataset.labels, 0)[:, 0].max()  # max label class
     nb = len(dataloader)  # number of batches
     assert mlc < nc, 'Label class %g exceeds nc=%g in %s. Possible class labels are 0-%g' % (mlc, nc, opt.data, nc - 1)
@@ -157,8 +158,8 @@ def train(hyp, opt, device, tb_writer=None):
     if rank in [-1, 0]:
         ema.updates = start_epoch * nb // accumulate  # set EMA updates ***
         # local_rank is set to -1. Because only the first process is expected to do evaluation.
-        testloader = create_dataloader(test_path, imgsz_test, batch_size, gs, opt, hyp=hyp, augment=False,
-                                       cache=opt.cache_images, rect=True, local_rank=-1, world_size=opt.world_size)[0]
+        testloader, test_dataset = create_dataloader(test_path, imgsz_test, batch_size, gs, opt, hyp=hyp, augment=False,
+                                       cache=opt.cache_images, rect=True, local_rank=-1, world_size=opt.world_size)
 
     # Model parameters
     hyp['cls'] *= nc / 80.  # scale coco-tuned hyp['cls'] to current dataset
@@ -175,8 +176,8 @@ def train(hyp, opt, device, tb_writer=None):
         # cf = torch.bincount(c.long(), minlength=nc) + 1.
         # model._initialize_biases(cf.to(device))
         plot_labels(labels, save_dir=log_dir)
-        if tb_writer:
-            tb_writer.add_histogram('classes', c, 0)
+        # if tb_writer:
+            # tb_writer.add_histogram('classes', c, 0)
 
         # Check anchors
         if not opt.noautoanchor:
@@ -195,6 +196,8 @@ def train(hyp, opt, device, tb_writer=None):
         print('Using %g dataloader workers' % dataloader.num_workers)
         print('Starting training for %g epochs...' % epochs)
     # torch.autograd.set_detect_anomaly(True)
+    
+
     for epoch in range(start_epoch, epochs):  # epoch ------------------------------------------------------------------
         model.train()
 
@@ -224,13 +227,21 @@ def train(hyp, opt, device, tb_writer=None):
             dataloader.sampler.set_epoch(epoch)
         pbar = enumerate(dataloader)
         if rank in [-1, 0]:
-            print(('\n' + '%10s' * 8) % ('Epoch', 'gpu_mem', 'GIoU', 'obj', 'cls', 'total', 'targets', 'img_size'))
+            print(('\n' + '%10s' * 12) % ('Epoch', 'gpu_mem', 'GIoU', 'obj', 'cls', 'total', 'targets', 'img_size', 'model_t', 'data_t', 'step_t', 'ema_t'))
             pbar = tqdm(pbar, total=nb)  # progress bar
         optimizer.zero_grad()
+        
+        m_data_time  = 0.0
+        m_model_time = 0.0
+        m_step_time  = 0.0
+        m_ema_time   = 0.0
+        ema_cnt      = 0
+        step_cnt     = 0
+        data_time = time.time()
         for i, (imgs, targets, paths, _) in pbar:  # batch -------------------------------------------------------------
             ni = i + nb * epoch  # number integrated batches (since train start)
             imgs = imgs.to(device, non_blocking=True).float() / 255.0  # uint8 to float32, 0-255 to 0.0-1.0
-
+            data_time = time.time() - data_time
             # Warmup
             if ni <= nw:
                 xi = [0, nw]  # x interp
@@ -250,6 +261,7 @@ def train(hyp, opt, device, tb_writer=None):
                     ns = [math.ceil(x * sf / gs) * gs for x in imgs.shape[2:]]  # new shape (stretched to gs-multiple)
                     imgs = F.interpolate(imgs, size=ns, mode='bilinear', align_corners=False)
 
+            model_time = time.time()
             # Autocast
             with amp.autocast(enabled=cuda):
                 # Forward                
@@ -266,21 +278,36 @@ def train(hyp, opt, device, tb_writer=None):
 
             # Backward
             scaler.scale(loss).backward()
-
+            model_time = time.time() - model_time
+            
             # Optimize
             if ni % accumulate == 0:
+                step_time = time.time()
+                ###############################################
                 scaler.step(optimizer)  # optimizer.step
                 scaler.update()
                 optimizer.zero_grad()
+                ###############################################
+                step_time = time.time() - step_time
+                m_step_time = (m_step_time * step_cnt + step_time) / (step_cnt + 1)
+                step_cnt += 1
                 if ema is not None:
-                    ema.update(model)
-
+                    ema_time = time.time()
+                    ##################################
+                    ema.update(model)                #
+                    ##################################
+                    ema_time = time.time() - ema_time
+                    m_ema_time = (m_ema_time * ema_cnt + ema_time) / (ema_cnt + 1)
+                    ema_cnt += 1
             # Print
             if rank in [-1, 0]:
+                m_data_time = (m_data_time * i + data_time) / (i + 1)
+                m_model_time = (m_model_time * i + model_time) / (i + 1)
+                
                 mloss = (mloss * i + loss_items) / (i + 1)  # update mean losses
                 mem = '%.3gG' % (torch.cuda.memory_reserved() / 1E9 if torch.cuda.is_available() else 0)  # (GB)
-                s = ('%10s' * 2 + '%10.4g' * 6) % (
-                    '%g/%g' % (epoch, epochs - 1), mem, *mloss, targets.shape[0], imgs.shape[-1])
+                s = ('%10s' * 2 + '%10.4g' * 10) % (
+                    '%g/%g' % (epoch, epochs - 1), mem, *mloss, targets.shape[0], imgs.shape[-1], m_model_time, m_data_time, m_step_time, m_ema_time)
                 pbar.set_description(s)
 
                 # Plot
@@ -290,7 +317,7 @@ def train(hyp, opt, device, tb_writer=None):
                     if tb_writer and result is not None:
                         tb_writer.add_image(f, result, dataformats='HWC', global_step=epoch)
                         # tb_writer.add_graph(model, imgs)  # add model to tensorboard
-
+            data_time = time.time()
             # end batch ------------------------------------------------------------------------------------------------
 
         # Scheduler
@@ -366,6 +393,8 @@ def train(hyp, opt, device, tb_writer=None):
             plot_results(save_dir=log_dir)  # save as results.png
         print('%g epochs completed in %.3f hours.\n' % (epoch - start_epoch + 1, (time.time() - t0) / 3600))
 
+    test_dataset.clean_shared_memory()
+    dataset.clean_shared_memory()
     dist.destroy_process_group() if rank not in [-1, 0] else None
     torch.cuda.empty_cache()
     return results
