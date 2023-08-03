@@ -148,8 +148,8 @@ def train(hyp, opt, device, tb_writer=None):
     # Trainloader
     dataloader, dataset = create_dataloader(train_path, imgsz, batch_size, gs, opt, hyp=hyp, augment=True,
                                             cache=opt.cache_images, rect=opt.rect, local_rank=rank,
-                                            world_size=opt.world_size,
-                                            use_shared_mem=True, shared_mem_limit=4000)
+                                            world_size=opt.world_size, 
+                                            use_shared_mem=False, shared_mem_limit=4000)
     mlc = np.concatenate(dataset.labels, 0)[:, 0].max()  # max label class
     nb = len(dataloader)  # number of batches
     assert mlc < nc, 'Label class %g exceeds nc=%g in %s. Possible class labels are 0-%g' % (mlc, nc, opt.data, nc - 1)
