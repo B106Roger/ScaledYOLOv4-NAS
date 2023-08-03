@@ -575,7 +575,6 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             l[:, 0] = i  # add target image index for build_targets()
         return torch.stack(img, 0), torch.cat(label, 0), path, shapes
 
-
     def clean_shared_memory(self):
         cur_rank, num_gpus = get_dist_info()
         num_iter = min([self.SHARED_MEM_LIMIT, self.n])
