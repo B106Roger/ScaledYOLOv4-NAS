@@ -124,7 +124,7 @@ def fuse_conv_and_bn(conv, bn):
         return fusedconv
 
 
-def model_info(model, verbose=False, resolution=(224,224), logger=None):
+def model_info(model, verbose=False, resolution=(224,224), print_str=False):
     # Plots a line-by-line description of a PyTorch model
     n_p = sum(x.numel() for x in model.parameters())  # number parameters
     n_g = sum(x.numel() for x in model.parameters() if x.requires_grad)  # number gradients
@@ -150,12 +150,10 @@ def model_info(model, verbose=False, resolution=(224,224), logger=None):
 
     s1 = 'Model Summary @%s: %g layers, %g parameters, %g gradients%s' % (res,     len(list(model.parameters())), n_p, n_g, fs)
     s2 = 'Model Summary @%s: %g layers, %g parameters, %g gradients%s' % (res_now, len(list(model.parameters())), n_p, n_g, fs_now)
-    if logger is not None:
-        logger.info(s1)
-        logger.info(s2)
-    else:
+    if print_str:
         print(s1)
         print(s2)
+    return s1+'\n'+s2
         
 def load_classifier(name='resnet101', n=2):
     # Loads a pretrained model reshaped to n-class output

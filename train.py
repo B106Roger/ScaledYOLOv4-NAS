@@ -12,6 +12,7 @@ import torch.optim as optim
 import torch.optim.lr_scheduler as lr_scheduler
 import torch.utils.data
 import yaml
+import shutil, sys
 from torch.cuda import amp
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.tensorboard import SummaryWriter
@@ -28,11 +29,32 @@ from utils.google_utils import attempt_download
 from utils.torch_utils import init_seeds, ModelEMA, select_device, intersect_dicts
 
 
+def config_backup(config_bakup_dir, code_backup_dir, args):
+    os.makedirs(config_bakup_dir, exist_ok=True)
+    os.makedirs(code_backup_dir,  exist_ok=True)
+    
+    shutil.copy(args.cfg,  os.path.join(config_bakup_dir, os.path.basename(args.cfg)))
+    shutil.copy(args.hyp,  os.path.join(config_bakup_dir, os.path.basename(args.hyp)))
+    shutil.copy(args.data, os.path.join(config_bakup_dir, os.path.basename(args.data)))
+    with open(os.path.join(config_bakup_dir, 'commandline.txt'), 'w') as f:
+        f.writelines(' '.join(sys.argv))
+        
+    shutil.copy(f'{__file__}',           os.path.join(code_backup_dir, os.path.basename(__file__)))
+    shutil.copy('models/common.py',      os.path.join(code_backup_dir, 'common.py'))
+
+
 def train(hyp, opt, device, tb_writer=None):
     print(f'Hyperparameters {hyp}')
     log_dir = Path(tb_writer.log_dir) if tb_writer else Path(opt.logdir) / 'evolve'  # logging directory
-    wdir = str(log_dir / 'weights') + os.sep  # weights directory
+    wdir        = str(log_dir / 'weights') + os.sep  # weights directory
+    code_dir    = str(log_dir / 'code') + os.sep     # code backup directory
+    config_dir  = str(log_dir / 'config') + os.sep   # config backup directory
+    
     os.makedirs(wdir, exist_ok=True)
+    os.makedirs(code_dir, exist_ok=True)
+    os.makedirs(config_dir, exist_ok=True)
+    config_backup(code_dir, config_dir, opt)
+    
     last = wdir + 'last.pt'
     best = wdir + 'best.pt'
     results_file = str(log_dir / 'results.txt')
@@ -71,7 +93,8 @@ def train(hyp, opt, device, tb_writer=None):
     else:
         model = Model(opt.cfg, ch=3, nc=nc, resolution=opt.img_size).to(device)# create
         #model = model.to(memory_format=torch.channels_last)  # create
-
+    with open(results_file, 'a') as f:
+        f.write(model.hardware_info + '\n')
     # Optimizer
     nbs = 64  # nominal batch size
     accumulate = max(round(nbs / total_batch_size), 1)  # accumulate loss before optimizing
@@ -180,6 +203,7 @@ def train(hyp, opt, device, tb_writer=None):
             # tb_writer.add_histogram('classes', c, 0)
 
         # Check anchors
+        print('not opt.noautoanchor', not opt.noautoanchor)
         if not opt.noautoanchor:
             check_anchors(dataset, model=model, thr=hyp['anchor_t'], imgsz=imgsz)
 
@@ -370,7 +394,7 @@ def train(hyp, opt, device, tb_writer=None):
 
                 # Save last, best and delete
                 torch.save(ckpt, last)
-                if epoch >= (epochs-30):
+                if epoch >= (epochs-10):
                     torch.save(ckpt, last.replace('.pt','_{:03d}.pt'.format(epoch)))
                 if best_fitness == fi:
                     torch.save(ckpt, best)
@@ -388,6 +412,10 @@ def train(hyp, opt, device, tb_writer=None):
                 ispt = f2.endswith('.pt')  # is *.pt
                 strip_optimizer(f2, f2.replace('.pt','_strip.pt')) if ispt else None  # strip optimizer
                 os.system('gsutil cp %s gs://%s/weights' % (f2, opt.bucket)) if opt.bucket and ispt else None  # upload
+        # store flop and params info again
+        with open(results_file, 'a') as f:
+            f.write(model.hardware_info + '\n')
+        
         # Finish
         if not opt.evolve:
             plot_results(save_dir=log_dir)  # save as results.png

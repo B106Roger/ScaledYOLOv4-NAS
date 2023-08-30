@@ -86,7 +86,7 @@ class Model(nn.Module):
         # Init weights, biases
         initialize_weights(self)
         self.resolution = resolution
-        self.info()
+        self.hardware_info = self.info()
         print('')
 
     def forward(self, x, augment=False, profile=False):
@@ -167,9 +167,9 @@ class Model(nn.Module):
         self.info()
         return self
 
-    def info(self):  # print model information
+    def info(self, print_str=True):  # print model information
         print('[Info] Model Resolution', self.resolution)
-        model_info(self, resolution=self.resolution)
+        return model_info(self, resolution=self.resolution, print_str=print_str)
 
 
 def parse_model(d, ch):  # model_dict, input_channels(3)
