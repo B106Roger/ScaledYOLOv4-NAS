@@ -1,1 +1,7 @@
 python -m torch.distributed.launch --nproc_per_node 2  train.py --batch-size 48 --img 416 --data ./data/coco.yaml --cfg ./models/yolov4-csp-coco.yaml --weights '' --device 0,1 --name csp-coco --hyp ./data/hyp.finetune.yaml --noautoanchor
+python train.py --device 7 --batch-size 16 --img-size 416 --data data/voc.yaml --hyp ./data/hyp.finetune.yaml --cfg ./models/exp_model/0919-v4-dy_temp-S42.yaml  --weights '' --name 0919-v4-dy_temp-S42
+
+python train.py --device 4 --batch-size 16 --img-size 416 --data data/voc.yaml --hyp ./data/hyp.finetune.yaml --cfg ./models/exp_model/0921-v4-dy_temp-S43.yaml  --weights '' --name 0921-v4-dy_temp-S43-01
+python train.py --device 5 --batch-size 16 --img-size 416 --data data/voc.yaml --hyp ./data/hyp.finetune.yaml --cfg ./models/exp_model/0921-v4-dy_temp-S43.yaml  --weights '' --name 0921-v4-dy_temp-S43-02
+python train.py --device 6 --batch-size 16 --img-size 416 --data data/voc.yaml --hyp ./data/hyp.finetune.yaml --cfg ./models/exp_model/0921-v4-dy_temp-S45.yaml  --weights '' --name 0921-v4-dy_temp-S45-01
+python train.py --device 7 --batch-size 16 --img-size 416 --data data/voc.yaml --hyp ./data/hyp.finetune.yaml --cfg ./models/exp_model/0921-v4-dy_temp-S45.yaml  --weights '' --name 0921-v4-dy_temp-S45-02
