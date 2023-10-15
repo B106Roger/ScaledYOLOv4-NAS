@@ -1,0 +1,57 @@
+{
+  nc: 20,
+  depth_multiple: 1.0,
+  width_multiple: 1.0,
+  anchors:
+    &id001 [
+      [13, 17, 31, 25, 24, 51, 61, 45],
+      [48, 102, 119, 96, 97, 189, 217, 184],
+      [171, 384, 324, 451, 616, 618, 800, 800],
+    ],
+  search_space:
+    {
+      BottleneckCSP_Search:
+        { gamma_space: [0.25, 0.5, 0.75], bottleneck_space: [1, 3, 7, 11] },
+      BottleneckCSP2_Search:
+        { gamma_space: [0.25, 0.5, 0.75], bottleneck_space: [1, 3, 5, 7] },
+    },
+  backbone:
+    [
+      [-1, 1, Conv, [32, 3, 1]],
+      [-1, 1, Conv, [64, 3, 2]],
+      [-1, 7, BottleneckCSP, [64]],
+      [-1, 1, Conv, [128, 3, 2]],
+      [-1, 7, BottleneckCSP, [128]],
+      [-1, 1, Conv, [256, 3, 2]],
+      [-1, 7, BottleneckCSP, [256]],
+      [-1, 1, Conv, [512, 3, 2]],
+      [-1, 7, BottleneckCSP, [512]],
+      [-1, 1, Conv, [1024, 3, 2]],
+      [-1, 3, BottleneckCSP, [1024]],
+    ],
+  head:
+    [
+      [-1, 1, SPPCSP, [512]],
+      [-1, 1, Conv, [256, 1, 1]],
+      [-1, 1, nn.Upsample, [null, 2, nearest]],
+      [8, 1, Conv, [256, 1, 1]],
+      [[-1, -2], 1, Concat, [1]],
+      [-1, 5, BottleneckCSP2, [256]],
+      [-1, 1, Conv, [128, 1, 1]],
+      [-1, 1, nn.Upsample, [null, 2, nearest]],
+      [6, 1, Conv, [128, 1, 1]],
+      [[-1, -2], 1, Concat, [1]],
+      [-1, 5, BottleneckCSP2, [128]],
+      [-1, 1, Conv, [256, 3, 1]],
+      [-2, 1, Conv, [256, 3, 2]],
+      [[-1, 16], 1, Concat, [1]],
+      [-1, 5, BottleneckCSP2, [256]],
+      [-1, 1, Conv, [512, 3, 1]],
+      [-2, 1, Conv, [512, 3, 2]],
+      [[-1, 11], 1, Concat, [1]],
+      [-1, 5, BottleneckCSP2, [512]],
+      [-1, 1, Conv, [1024, 3, 1]],
+      [[22, 26, 30], 1, Detect, [20, *id001]],
+    ],
+  csp_gammas: [0.5, 0.5, 0.5, 0.5, 0.5, 0.75, 0.5, 0.25, 0.5],
+}
