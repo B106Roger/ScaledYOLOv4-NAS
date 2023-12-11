@@ -24,7 +24,7 @@ from utils.datasets import create_dataloader
 from utils.general import (
     check_img_size, torch_distributed_zero_first, labels_to_class_weights, plot_labels, check_anchors,
     labels_to_image_weights, compute_loss, plot_images, fitness, strip_optimizer, plot_results,
-    get_latest_run, check_git_status, check_file, increment_dir, print_mutation, plot_evolution)
+    get_latest_run, check_git_status, check_file, increment_dir, print_mutation, plot_evolution, check_anchors_save)
 from utils.google_utils import attempt_download
 from utils.torch_utils import init_seeds, ModelEMA, select_device, intersect_dicts
 
@@ -205,7 +205,7 @@ def train(hyp, opt, device, tb_writer=None):
         # Check anchors
         print('not opt.noautoanchor', not opt.noautoanchor)
         if not opt.noautoanchor:
-            check_anchors(dataset, model=model, thr=hyp['anchor_t'], imgsz=imgsz)
+            check_anchors_save(log_dir, dataset, model=model, thr=hyp['anchor_t'], imgsz=imgsz)
 
     # Start training
     t0 = time.time()

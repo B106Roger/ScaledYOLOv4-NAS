@@ -4,11 +4,11 @@ import math
 import torch
 import torch.nn as nn
 
-from mish_cuda import MishCuda as Mish
+# from mish_cuda import MishCuda as Mish
 
 # A callable object that could return a activation instance
-# DEFAULT_ACTIVATION = lambda : nn.ReLU(inplace=True)
-DEFAULT_ACTIVATION = Mish
+DEFAULT_ACTIVATION = lambda : nn.ReLU(inplace=True)
+# DEFAULT_ACTIVATION = Mish
 
 
 def autopad(k, p=None):  # kernel, padding
