@@ -3,11 +3,11 @@
 This is the implementation of "[Scaled-YOLOv4: Scaling Cross Stage Partial Network](https://arxiv.org/abs/2011.08036)" using PyTorch framwork.
 
 ## Model
-``` ./models/yolov4-p5-zdnas-depth-40.yaml```
+``` ./models/yolov4-p5-zdnas-depth-40.yaml```  
 The searched yolov4-p5 model by our algorithm with depth-loss and 40 GFLOPS
-``` ./models/yolov4-p5-zdnaswot70-relu.yaml```
+``` ./models/yolov4-p5-zdnaswot70-relu.yaml```  
 The searched yolov4-p5 model by our algorithm with 70 GFLOPS
-``` ./models/yolov4-snip50.yaml```
+``` ./models/yolov4-snip50.yaml```  
 The searched yolov4-csp model by SNIP with 50 GFLOPS
 
 ## Search Space Modification
