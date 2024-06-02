@@ -61,7 +61,14 @@ def test(data,
         model.half()
 
     # Configure
+    print(f"EMA.27.conv.marge = {model.model[27].conv.merged}")
+    print(f"EMA.27.conv.weight = {model.model[27].conv.conv.weight}")
     model.eval()
+    print(f"EMA.27.conv.marge = {model.model[27].conv.merged}")
+    print(f"EMA.27.conv.weight = {model.model[27].conv.conv.weight}")
+    # for name, param in model.named_parameters():
+    #     print(f"{name}: {param.requires_grad}")
+
     with open(data) as f:
         data = yaml.load(f, Loader=yaml.FullLoader)  # model dict
     nc = 1 if single_cls else int(data['nc'])  # number of classes

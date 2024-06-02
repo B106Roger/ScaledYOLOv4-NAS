@@ -8,7 +8,7 @@ import torch.backends.cudnn as cudnn
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.models as models
-
+import loralib as lora
 
 def init_seeds(seed=0):
     torch.manual_seed(seed)
@@ -212,7 +212,12 @@ class ModelEMA:
 
     def __init__(self, model, decay=0.9999, updates=0):
         # Create EMA
-        self.ema = deepcopy(model.module if is_parallel(model) else model).eval()  # FP32 EMA
+        self.ema = deepcopy(model.module if is_parallel(model) else model)#.eval()  # FP32 EMA
+        # print(f"EMA.27.conv.marge = {self.ema.model[27].conv.merged}")
+        # for name, param in self.ema.named_parameters():
+        #     print(f"{name}: {param.requires_grad}")
+        
+        # print(f"EMA.27.conv.marge = {self.ema.model[27].conv.merged}")
         # if next(model.parameters()).device.type != 'cpu':
         #     self.ema.half()  # FP16 EMA
         self.updates = updates  # number of EMA updates
@@ -231,6 +236,26 @@ class ModelEMA:
                 if v.dtype.is_floating_point:
                     v *= d
                     v += (1. - d) * msd[k].detach()
+
+    def update_lora(self, model):
+        # Update EMA parameters
+        # i = 0
+        with torch.no_grad():
+            self.updates += 1
+            d = self.decay(self.updates)
+
+            # msd = model.module.state_dict() if is_parallel(model) else model.state_dict()  # model state_dict
+            msd = lora.lora_state_dict(model.module) if is_parallel(model) else lora.lora_state_dict(model)
+            # for k, v in self.ema.state_dict().items():
+            for k, v in lora.lora_state_dict(self.ema).items():
+                if v.dtype.is_floating_point:
+                    # print(self.updates)
+                    # print(d)
+                    # i += 1
+                    v *= d
+                    v += (1. - d) * msd[k].detach()
+                    # print(v)
+        # print(i)
 
     def update_attr(self, model, include=(), exclude=('process_group', 'reducer')):
         # Update EMA attributes
