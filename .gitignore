@@ -3,4 +3,5 @@ data/coco
 data/VOC2007
 runs/*
 *.json
+doc/
 __pycache__
