@@ -4,11 +4,19 @@ import math
 import torch
 import torch.nn as nn
 
-# from mish_cuda import MishCuda as Mish
+from mish_cuda import MishCuda as Mish
+from loralib import ConvLoRA
 
 # A callable object that could return a activation instance
-DEFAULT_ACTIVATION = lambda : nn.ReLU(inplace=True)
-# DEFAULT_ACTIVATION = Mish
+# DEFAULT_ACTIVATION = lambda : nn.ReLU(inplace=True)
+DEFAULT_ACTIVATION = Mish
+
+DEFAULT_NORMALIZATION = lambda in_chs: nn.BatchNorm2d(in_chs)
+# DEFAULT_NORMALIZATION = lambda in_chs: nn.GroupNorm(1, in_chs)
+
+# LoRA rank, alpha
+LORA_RAN_BASE = 16
+LORA_ALPHA_BASE = 2
 
 
 def autopad(k, p=None):  # kernel, padding
@@ -28,7 +36,11 @@ class Conv(nn.Module):
     def __init__(self, c1, c2, k=1, s=1, p=None, g=1, act=True):  # ch_in, ch_out, kernel, stride, padding, groups
         super(Conv, self).__init__()
         self.conv = nn.Conv2d(c1, c2, k, s, autopad(k, p), groups=g, bias=False)
-        self.bn = nn.BatchNorm2d(c2)
+        # LORA_RANK = int(c2 // LORA_RAN_BASE)
+        # LORA_ALPHA = int(LORA_RANK * LORA_ALPHA_BASE)
+        # self.conv = ConvLoRA(nn.Conv2d, c1, c2, k, r=LORA_RANK, lora_alpha=LORA_ALPHA, stride=s, padding=autopad(k, p), groups=g, bias=False)
+        # self.bn = nn.BatchNorm2d(c2)
+        self.bn  = DEFAULT_NORMALIZATION(c2)
         self.act = DEFAULT_ACTIVATION() if act else nn.Identity()
 
     def forward(self, x):
@@ -59,8 +71,13 @@ class BottleneckCSP(nn.Module):
         self.cv1 = Conv(c1, c_, 1, 1)
         self.cv2 = nn.Conv2d(c1, c_, 1, 1, bias=False)
         self.cv3 = nn.Conv2d(c_, c_, 1, 1, bias=False)
+        # LORA_RANK = int(c2 // LORA_RAN_BASE)
+        # LORA_ALPHA = int(LORA_RANK * LORA_ALPHA_BASE)
+        # self.cv2 = ConvLoRA(nn.Conv2d, c1, c_, 1, r=LORA_RANK, lora_alpha=LORA_ALPHA, stride=1, bias=False)
+        # self.cv3 = ConvLoRA(nn.Conv2d, c_, c_, 1, r=LORA_RANK, lora_alpha=LORA_ALPHA, stride=1, bias=False)
         self.cv4 = Conv(2 * c_, c2, 1, 1)
-        self.bn = nn.BatchNorm2d(2 * c_)  # applied to cat(cv2, cv3)
+        # self.bn = nn.BatchNorm2d(2 * c_)  # applied to cat(cv2, cv3)
+        self.bn  = DEFAULT_NORMALIZATION(2 * c_)
         self.act = DEFAULT_ACTIVATION()
         self.m = nn.Sequential(*[Bottleneck(c_, c_, shortcut, g, e=1.0) for _ in range(n)])
 
@@ -77,8 +94,12 @@ class BottleneckCSP2(nn.Module):
         c_ = int(c2 * (e + 0.5))  # hidden channels
         self.cv1 = Conv(c1, c_, 1, 1)
         self.cv2 = nn.Conv2d(c_, c_, 1, 1, bias=False)
+        # LORA_RANK = int(c2 // LORA_RAN_BASE)
+        # LORA_ALPHA = int(LORA_RANK * LORA_ALPHA_BASE)
+        # self.cv2 = ConvLoRA(nn.Conv2d, c_, c_, 1, r=LORA_RANK, lora_alpha=LORA_ALPHA, stride=1, bias=False)
         self.cv3 = Conv(2 * c_, c2, 1, 1)
-        self.bn = nn.BatchNorm2d(2 * c_) 
+        # self.bn = nn.BatchNorm2d(2 * c_) 
+        self.bn  = DEFAULT_NORMALIZATION(2 * c_)
         self.act = DEFAULT_ACTIVATION()
         self.m = nn.Sequential(*[Bottleneck(c_, c_, shortcut, g, e=1.0) for _ in range(n)])
 
@@ -126,12 +147,16 @@ class SPPCSP(nn.Module):
         c_ = int(2 * c2 * e)  # hidden channels
         self.cv1 = Conv(c1, c_, 1, 1)
         self.cv2 = nn.Conv2d(c1, c_, 1, 1, bias=False)
+        # LORA_RANK = int(c2 // LORA_RAN_BASE)
+        # LORA_ALPHA = int(LORA_RANK * LORA_ALPHA_BASE)
+        # self.cv2 = ConvLoRA(nn.Conv2d,c1, c_, 1, r=LORA_RANK, lora_alpha=LORA_ALPHA, stride=1, bias=False)
         self.cv3 = Conv(c_, c_, 3, 1)
         self.cv4 = Conv(c_, c_, 1, 1)
         self.m = nn.ModuleList([nn.MaxPool2d(kernel_size=x, stride=1, padding=x // 2) for x in k])
         self.cv5 = Conv(4 * c_, c_, 1, 1)
         self.cv6 = Conv(c_, c_, 3, 1)
-        self.bn = nn.BatchNorm2d(2 * c_) 
+        # self.bn = nn.BatchNorm2d(2 * c_) 
+        self.bn  = DEFAULT_NORMALIZATION(2 * c_)
         self.act = DEFAULT_ACTIVATION()
         self.cv7 = Conv(2 * c_, c2, 1, 1)
 
@@ -185,6 +210,9 @@ class Classify(nn.Module):
         super(Classify, self).__init__()
         self.aap = nn.AdaptiveAvgPool2d(1)  # to x(b,c1,1,1)
         self.conv = nn.Conv2d(c1, c2, k, s, autopad(k, p), groups=g, bias=False)  # to x(b,c2,1,1)
+        # LORA_RANK = int(c2 // LORA_RAN_BASE)
+        # LORA_ALPHA = int(LORA_RANK * LORA_ALPHA_BASE)
+        # self.conv = ConvLoRA(nn.Conv2d, c1, c2, k, r=LORA_RANK, lora_alpha=LORA_ALPHA, stride=s, padding=autopad(k, p), groups=g, bias=False)  # to x(b,c2,1,1)
         self.flat = Flatten()
 
     def forward(self, x):
@@ -219,6 +247,10 @@ class DWConvLayer(nn.Sequential):
         
         self.add_module('dwconv', nn.Conv2d(groups, groups, kernel_size=3,
                                           stride=stride, padding=1, groups=groups, bias=bias))
+        # LORA_RANK = int(c2 // LORA_RAN_BASE)
+        # LORA_ALPHA = int(LORA_RANK * LORA_ALPHA_BASE)
+        # self.add_module('dwconv', ConvLoRA(nn.Conv2d, groups, groups, kernel_size=3, r=LORA_RANK, lora_alpha=LORA_ALPHA,
+        #                                   stride=stride, padding=1, groups=groups, bias=bias))
         self.add_module('norm', nn.BatchNorm2d(groups))
     def forward(self, x):
         return super().forward(x)  
@@ -228,9 +260,13 @@ class ConvLayer(nn.Sequential):
         super().__init__()
         out_ch = out_channels
         groups = 1
-        #print(kernel, 'x', kernel, 'x', in_channels, 'x', out_channels)
+        print(kernel, 'x', kernel, 'x', in_channels, 'x', out_channels)
         self.add_module('conv', nn.Conv2d(in_channels, out_ch, kernel_size=kernel,          
                                           stride=stride, padding=kernel//2, groups=groups, bias=bias))
+        # LORA_RANK = int(c2 // LORA_RAN_BASE)
+        # LORA_ALPHA = int(LORA_RANK * LORA_ALPHA_BASE)
+        # self.add_module('conv', ConvLoRA(nn.Conv2d, in_channels, out_ch, kernel_size=kernel, r=LORA_RANK, lora_alpha=LORA_ALPHA,         
+        #                                   stride=stride, padding=kernel//2, groups=groups, bias=bias))
         self.add_module('norm', nn.BatchNorm2d(out_ch))
         self.add_module('relu', nn.ReLU6(True))                                          
     def forward(self, x):

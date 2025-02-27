@@ -11,12 +11,14 @@ import torch.nn.functional as F
 import torch.optim as optim
 import torch.optim.lr_scheduler as lr_scheduler
 import torch.utils.data
+# import torchprof
 import yaml
 import shutil, sys
 from torch.cuda import amp
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
+import loralib as lora
 
 import test  # import test.py to get mAP after each epoch
 from models.yolo import Model
@@ -95,6 +97,7 @@ def train(hyp, opt, device, tb_writer=None):
         #model = model.to(memory_format=torch.channels_last)  # create
     with open(results_file, 'a') as f:
         f.write(model.hardware_info + '\n')
+
     # Optimizer
     nbs = 64  # nominal batch size
     accumulate = max(round(nbs / total_batch_size), 1)  # accumulate loss before optimizing
@@ -192,6 +195,8 @@ def train(hyp, opt, device, tb_writer=None):
     model.class_weights = labels_to_class_weights(dataset.labels, nc).to(device)  # attach class weights
     model.names = names
 
+    # lora.mark_only_lora_as_trainable(model)
+
     # Class frequency
     if rank in [-1, 0]:
         labels = np.concatenate(dataset.labels, 0)
@@ -221,6 +226,9 @@ def train(hyp, opt, device, tb_writer=None):
         print('Starting training for %g epochs...' % epochs)
     # torch.autograd.set_detect_anomaly(True)
     
+    # Calculate trainable parameters
+    pytorch_total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"Trainable Parameters (Model): {pytorch_total_params}")
 
     for epoch in range(start_epoch, epochs):  # epoch ------------------------------------------------------------------
         model.train()
@@ -288,9 +296,11 @@ def train(hyp, opt, device, tb_writer=None):
             model_time = time.time()
             # Autocast
             with amp.autocast(enabled=cuda):
-                # Forward                
+                # with torchprof.Profile(model, use_cuda=True) as prof:
+                    # Forward              
                 pred = model(imgs)
                 #pred = model(imgs.to(memory_format=torch.channels_last))
+                # print(prof.display(show_events=False)) # equivalent to `print(prof)` and `print(prof.display())`
 
                 # Loss
                 loss, loss_items = compute_loss(pred, targets.to(device), model)  # scaled by batch_size
@@ -303,6 +313,7 @@ def train(hyp, opt, device, tb_writer=None):
             # Backward
             scaler.scale(loss).backward()
             model_time = time.time() - model_time
+            # print(f"Loss Compute Time : {model_time}")
             
             # Optimize
             if ni % accumulate == 0:
@@ -313,6 +324,7 @@ def train(hyp, opt, device, tb_writer=None):
                 optimizer.zero_grad()
                 ###############################################
                 step_time = time.time() - step_time
+                # print(f"Step Time : {step_time}")
                 m_step_time = (m_step_time * step_cnt + step_time) / (step_cnt + 1)
                 step_cnt += 1
                 if ema is not None:
@@ -335,12 +347,12 @@ def train(hyp, opt, device, tb_writer=None):
                 pbar.set_description(s)
 
                 # Plot
-                if ni < 3:
-                    f = str(log_dir / ('train_batch%g.jpg' % ni))  # filename
-                    result = plot_images(images=imgs, targets=targets, paths=paths, fname=f)
-                    if tb_writer and result is not None:
-                        tb_writer.add_image(f, result, dataformats='HWC', global_step=epoch)
-                        # tb_writer.add_graph(model, imgs)  # add model to tensorboard
+                # if ni < 3:
+                #     f = str(log_dir / ('train_batch%g.jpg' % ni))  # filename
+                #     result = plot_images(images=imgs, targets=targets, paths=paths, fname=f)
+                #     if tb_writer and result is not None:
+                #         tb_writer.add_image(f, result, dataformats='HWC', global_step=epoch)
+                #         # tb_writer.add_graph(model, imgs)  # add model to tensorboard
             data_time = time.time()
             # end batch ------------------------------------------------------------------------------------------------
 
@@ -394,8 +406,8 @@ def train(hyp, opt, device, tb_writer=None):
 
                 # Save last, best and delete
                 torch.save(ckpt, last)
-                if epoch >= (epochs-10):
-                    torch.save(ckpt, last.replace('.pt','_{:03d}.pt'.format(epoch)))
+                # if epoch >= (epochs-10):
+                #     torch.save(ckpt, last.replace('.pt','_{:03d}.pt'.format(epoch)))
                 if best_fitness == fi:
                     torch.save(ckpt, best)
                 del ckpt
