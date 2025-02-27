@@ -2,32 +2,26 @@
 
 This is the implementation of "[Scaled-YOLOv4: Scaling Cross Stage Partial Network](https://arxiv.org/abs/2011.08036)" using PyTorch framwork.
 
-## Model
-``` ./models/yolov4-p5-zdnas-depth-40.yaml```  
-The searched yolov4-p5 model by our algorithm with depth-loss and 40 GFLOPS  
-``` ./models/yolov4-p5-zdnaswot70-relu.yaml```  
-The searched yolov4-p5 model by our algorithm with 70 GFLOPS  
-``` ./models/yolov4-snip50.yaml```  
-The searched yolov4-csp model by SNIP with 50 GFLOPS
+## Note
+This is Mish activation function version. If you want to use ReLU activation function, you can use **relu** branch. Or you can modify the common.py file (./models/common.py) 
+![`models/common.py`](doc/yolo_common_activation.png)
 
-## Search Space Modification
-1. Modify Network Architecture(models/common.py)
-![`models/common.py`](doc/common_py_diff.jpg)
+### Dataset Position
+```
 
-2. Modify Parsing Config(models/yolo.py)
+└── data
+    ├── coco  (Link)
+    └── VOC2007 (Link) 
 
-3. Provide FLOPS information under different resolution(models/yolo.py)
+```
 
-- Pass input resolution into model constructor
-![`train.py`](doc/train_py_diff.png)
-
-- Caclculate FLOPS under given resolution
-![`utils/torch_utils.py`](doc/torch_utils_py_diff.png)
-
-## Training Screen
-```python train.py --batch-size 64 --img-size 416 --data coco.yaml --cfg ./models/yolov4-snip50.yaml  --weights '' --device 0 --name test```
-The commands above should generate following screen.
-![`demo training`](doc/demo_training.jpg)
+## Comments
+### Training
+```python train.py --batch-size 32 --img-size 416 --data voc.yaml --hyp ./data/hyp.finetune.yaml --cfg ./models/yolov4-csp.yaml --weights '' --device 3,4 --name EXP_NAME```
+### Testing
+```python test.py --img 416 --conf 0.001 --batch 8 --device 5 --data voc.yaml --weights BEST_WEIGHT.pt```
+### Convert .pt into .onnx
+```python ./export.py --weights WEIGHT.pt --img-size 416```
 
 ## For detail comparison please visit following url
 comparison between current [ScaledYOLOv4-NAS](https://github.com/B106Roger/ScaledYOLOv4-NAS/commit/3d56bebfd8f39fc803b3980147e9f446c841c024) and [WongKinYiu/ScaledYOLOv4](https://github.com/WongKinYiu/ScaledYOLOv4) master branch.
